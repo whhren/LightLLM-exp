@@ -70,12 +70,12 @@ class ChunkedPrefillQueue(BaseQueue):
         is_busy = self.is_busy()
 
     # 短作业优先代码
-    #     self.waiting_req_list.sort(
-    #     key=lambda req: req.get_tuple_tokens(
-    #         is_busy, self.router.router_statics.ema_req_out_len
-    #     )[1],
-    # 
-    # )
+        self.waiting_req_list.sort(
+        key=lambda req: req.get_tuple_tokens(
+            is_busy, self.router.router_statics.ema_req_out_len
+        )[1],
+    
+    )
 
 
     # 长作业优先代码

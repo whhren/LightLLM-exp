@@ -416,7 +416,7 @@ def main(args: argparse.Namespace):
 
     filename = (
         f"results/"
-        f"fcfs_"
+        f"sjf_"
         f"rate{int(args.request_rate)}_"
         f"req{args.num_prompts}.json"
     )
