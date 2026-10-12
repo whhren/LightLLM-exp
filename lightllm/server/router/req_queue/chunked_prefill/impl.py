@@ -8,6 +8,8 @@ class ChunkedPrefillQueue(BaseQueue):
     def __init__(self, args, router, dp_index, dp_size_in_node) -> None:
         super().__init__(args, router, dp_index, dp_size_in_node)
         self.batch_max_tokens = self.batch_max_tokens * 2
+        self.need_sch = False
+
 
     def _init_cache_list(self, current_batch: Batch, is_busy):
         if current_batch is not None:
@@ -67,14 +69,47 @@ class ChunkedPrefillQueue(BaseQueue):
 
         is_busy = self.is_busy()
 
+    # 短作业优先代码
+    #     self.waiting_req_list.sort(
+    #     key=lambda req: req.get_tuple_tokens(
+    #         is_busy, self.router.router_statics.ema_req_out_len
+    #     )[1],
+    # 
+    # )
+
+
+    # 长作业优先代码
+    #     self.waiting_req_list.sort(
+    #     key=lambda req: req.get_tuple_tokens(
+    #         is_busy, self.router.router_statics.ema_req_out_len
+    #     )[1],
+    # reverse=True
+    # )
+
+        # bub sort
+        # for i in range(len(self.waiting_req_list) - 1):
+        #     cur_len = self.waiting_req_list[i].get_tuple_tokens(
+        #         is_busy, self.router.router_statics.ema_req_out_len
+        #     )[1]
+
+        #     next_len = self.waiting_req_list[i + 1].get_tuple_tokens(
+        #         is_busy, self.router.router_statics.ema_req_out_len
+        #     )[1]
+
+        #     if cur_len > next_len:
+        #         self.waiting_req_list[i], self.waiting_req_list[i + 1] = (
+        #             self.waiting_req_list[i + 1],
+        #             self.waiting_req_list[i],
+        #         )
+
+
+
         new_batch_first_router_need_tokens = (
-            0 if current_batch is None else current_batch.get_batch_decode_need_tokens()[self.dp_index]
-        )
+                0 if current_batch is None else current_batch.get_batch_decode_need_tokens()[self.dp_index])
 
         self._init_cache_list(current_batch, is_busy)
         can_run_list = []
         consumed_req_count = 0
-
         waiting_queue = self.waiting_req_list
 
         for req in waiting_queue:

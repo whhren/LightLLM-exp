@@ -175,10 +175,13 @@ class DPChunkedPrefillBackend(ModeBackend):
         event_pack: OverlapEventPack,
         prefill_reqs: List[InferReq],
     ):
+        
         model_input, run_reqs = prepare_prefill_inputs(prefill_reqs, is_chuncked_mode=not self.disable_chunked_prefill)
         run_reqs_num = len(run_reqs)
         with torch.cuda.stream(g_infer_context.get_overlap_stream()):
-            model_output = self.model.forward(model_input)
+            # 加入nvtx標記
+            with torch.cuda.nvtx.range("LIGHTLLM_PREFILL"):
+                model_output = self.model.forward(model_input)
             self._capture_prompt_logprobs_if_needed(model_input, run_reqs, model_output.prompt_logics)
             if run_reqs_num > 0:
                 (
@@ -232,7 +235,9 @@ class DPChunkedPrefillBackend(ModeBackend):
         model_input: ModelInput = model_input
         run_reqs_num = len(run_reqs)
         with torch.cuda.stream(g_infer_context.get_overlap_stream()):
-            model_output = self.model.forward(model_input)
+            # nvtx標記
+            with torch.cuda.nvtx.range("LIGHTLLM_DECODE"):
+                model_output = self.model.forward(model_input)
             if run_reqs_num > 0:
                 (
                     _,

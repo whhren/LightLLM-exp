@@ -105,10 +105,12 @@ class ChunkedPrefillBackend(ModeBackend):
         event_pack: OverlapEventPack,
         prefill_reqs: List[InferReq],
     ):
+        print(f"[NCU-DEBUG] prefill_normal reqs={len(prefill_reqs)}", flush=True)
         # 第一阶段: 模型推理
         model_input, run_reqs = prepare_prefill_inputs(prefill_reqs, is_chuncked_mode=not self.disable_chunked_prefill)
         with torch.cuda.stream(g_infer_context.get_overlap_stream()):
-            model_output = self.model.forward(model_input)
+            with torch.cuda.nvtx.range("LIGHTLLM_PREFILL"):
+                model_output = self.model.forward(model_input)
             self._capture_prompt_logprobs_if_needed(model_input, run_reqs, model_output.prompt_logics)
             (_, next_token_ids_cpu, next_token_logprobs_cpu, next_token_ranks_cpu,) = self._sample_and_scatter_token(
                 logits=model_output.logits,
@@ -153,7 +155,8 @@ class ChunkedPrefillBackend(ModeBackend):
     ):
         model_input, run_reqs = prepare_decode_inputs(decode_reqs)
         with torch.cuda.stream(g_infer_context.get_overlap_stream()):
-            model_output = self.model.forward(model_input)
+            with torch.cuda.nvtx.range("LIGHTLLM_DECODE"):
+                model_output = self.model.forward(model_input)
             (_, next_token_ids_cpu, next_token_logprobs_cpu, next_token_ranks_cpu,) = self._sample_and_scatter_token(
                 logits=model_output.logits,
                 b_req_idx=model_input.b_req_idx,

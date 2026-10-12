@@ -22,7 +22,8 @@ import json
 import random
 import time
 from typing import AsyncGenerator, List, Tuple, Union
-
+import os
+import json
 import aiohttp
 import numpy as np
 from transformers import AutoModelForCausalLM, PreTrainedTokenizerBase
@@ -144,7 +145,7 @@ def sample_requests(
     for i in range(len(built_examples)):
         messages, _ = built_examples[i]
         prompt_len = len(prompt_token_ids[i])
-        output_len = min(len(completion_token_ids[i]), 128)
+        output_len = len(completion_token_ids[i])
         tokenized_dataset.append((messages, rendered_prompts[i], prompt_len, output_len))
 
     # Filter out too long or too short sequences.
@@ -215,7 +216,7 @@ async def send_request(
             "top_p": 1.0,
             "temperature": 0,
             "stream": True,
-            "ignore_eos": True,
+            "ignore_eos": False,
             "max_tokens": output_len,
         }
         timeout = aiohttp.ClientTimeout(total=3 * 3600)
@@ -333,35 +334,183 @@ def main(args: argparse.Namespace):
     np.random.seed(args.seed)
     tokenizer = get_tokenizer(args.tokenizer, "slow")
     input_requests = sample_requests(
-        args.dataset, args.num_prompts, tokenizer, args.history_turns, args.max_total_tokens
+        args.dataset,
+        args.num_prompts,
+        tokenizer,
+        args.history_turns,
+        args.max_total_tokens
     )
-
     benchmark_start_time = time.time()
-    asyncio.run(benchmark(input_requests, args.request_rate, args.use_openai_api, args.concurrency, args.port))
+    asyncio.run(
+        benchmark(
+            input_requests,
+            args.request_rate,
+            args.use_openai_api,
+            args.concurrency,
+            args.port
+        )
+    )
     benchmark_end_time = time.time()
     benchmark_time = benchmark_end_time - benchmark_start_time
-    print(f"Total time: {benchmark_time:.2f} s")
-    print(f"Throughput: {args.num_prompts / benchmark_time:.2f} requests/s")
 
-    # Compute the latency statistics.
-    avg_latency = np.mean([latency for _, _, latency, _ in REQUEST_LATENCY])
-    print(f"Average latency: {avg_latency:.2f} s")
-    avg_time_to_first_token = np.mean([ttft for _, _, _, ttft in REQUEST_LATENCY])
-    print("Average time to first token: " f"{avg_time_to_first_token:.2f} s")
-    avg_per_token_latency = (
-        np.mean([latency / (prompt_len + output_len) for prompt_len, output_len, latency, _ in REQUEST_LATENCY]) * 1000
+    # =========================
+    # 统计实验数据
+    # =========================
+    avg_latency = np.mean(
+        [latency for _, _, latency, _ in REQUEST_LATENCY]
     )
-    print(f"Average latency per token: {avg_per_token_latency:.1f} ms")
-    # avg_per_output_token_latency = np.mean([latency / output_len for _, output_len, latency, _ in REQUEST_LATENCY])
-    # print("Average latency per output token: " f"{avg_per_output_token_latency:.2f} s")
+
+    avg_time_to_first_token = np.mean(
+        [ttft for _, _, _, ttft in REQUEST_LATENCY]
+    )
+
+    avg_per_token_latency = (
+        np.mean(
+            [
+                latency / (prompt_len + output_len)
+                for prompt_len, output_len, latency, _ in REQUEST_LATENCY
+            ]
+        ) * 1000
+    )
+
     avg_inter_token_latency = (
         np.mean(
-            [(latency - ttft) / (output_len - 1) for _, output_len, latency, ttft in REQUEST_LATENCY if output_len > 1]
+            [
+                (latency - ttft) / (output_len - 1)
+                for _, output_len, latency, ttft in REQUEST_LATENCY
+                if output_len > 1
+            ]
         )
         * 1000
     )
-    print(f"Average inter-token latency: {avg_inter_token_latency:.1f} ms")
+    # tail latency
+    latencies = np.array(
+        [x[2] for x in REQUEST_LATENCY]
+    )
+    p10_latency = np.percentile(latencies, 10)
+    p20_latency = np.percentile(latencies, 20)
+    p50_latency = np.percentile(latencies, 50)
+    p90_latency = np.percentile(latencies, 90)
+    p99_latency = np.percentile(latencies, 99)
 
+    # token长度统计
+    input_lens = [
+        x[0] for x in REQUEST_LATENCY
+    ]
+    output_lens = [
+        x[1] for x in REQUEST_LATENCY
+    ]
+    total_lens = [
+        x[0] + x[1]
+        for x in REQUEST_LATENCY
+    ]
+    hit_max_tokens = sum(
+        1 for x in total_lens
+        if x >= args.max_total_tokens
+    )
+    # =========================
+    # 保存结果
+    # =========================
+
+    os.makedirs("results", exist_ok=True)
+
+    filename = (
+        f"results/"
+        f"fcfs_"
+        f"rate{int(args.request_rate)}_"
+        f"req{args.num_prompts}.json"
+    )
+
+
+    result = {
+
+        # 实验配置
+        "config": {
+            "request_rate": args.request_rate,
+            "num_prompts": args.num_prompts,
+            "history_turns": args.history_turns,
+            "max_total_tokens": args.max_total_tokens,
+        },
+
+
+        # 总体指标
+        "summary": {
+
+            "total_time": benchmark_time,
+            "throughput": (
+                len(REQUEST_LATENCY)
+                / benchmark_time
+            ),
+            "avg_latency": float(avg_latency),
+            "avg_ttft": float(
+                avg_time_to_first_token
+            ),
+            "avg_latency_per_token_ms": float(
+                avg_per_token_latency
+            ),
+            "avg_inter_token_latency_ms": float(
+                avg_inter_token_latency
+            ),
+            # tail latency
+            "p10_latency": float(p10_latency),
+            "p20_latency": float(p20_latency),
+            "p50_latency": float(p50_latency),
+            "p90_latency": float(p90_latency),
+            "p99_latency": float(p99_latency),
+
+            # token情况
+            "avg_input_len": float(
+                np.mean(input_lens)
+            ),
+            "avg_output_len": float(
+                np.mean(output_lens)
+            ),
+            "max_output_len": int(
+                max(output_lens)
+            ),
+            # EOS/限制检测
+            "hit_max_total_tokens": hit_max_tokens,
+
+            "total_requests": len(total_lens),
+        },
+        # 请求级数据
+        "requests": []
+    }
+
+
+
+    for i, (
+        input_len,
+        output_len,
+        latency,
+        ttft
+    ) in enumerate(REQUEST_LATENCY):
+
+        result["requests"].append(
+            {
+                "request_id": i,
+
+                "input_len": input_len,
+
+                "output_len": output_len,
+
+                "total_len": (
+                    input_len + output_len
+                ),
+
+                "latency": latency,
+
+                "ttft": ttft,
+            }
+        )
+
+    with open(filename, "w") as f:
+        json.dump(
+            result,
+            f,
+            indent=4
+        )
+    print(f"saved: {filename}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Benchmark the online serving throughput.")

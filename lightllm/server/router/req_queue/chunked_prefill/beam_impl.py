@@ -7,6 +7,7 @@ from lightllm.server.router.req_queue.base_queue import BaseQueue
 class ChunkedBeamContinuesBatchQueue(BaseQueue):
     def __init__(self, args, router, dp_index, dp_size_in_node) -> None:
         super().__init__(args, router, dp_index, dp_size_in_node)
+        self.need_sch = False
         return
 
     def _init_cache_list(self, current_batch: Batch, is_busy):
@@ -22,13 +23,14 @@ class ChunkedBeamContinuesBatchQueue(BaseQueue):
 
     # @calculate_time(show=True, min_cost_ms=0.1)
     def _can_add_new_group_reqs(self, cur_handle_group_reqs: List[Req], is_busy, new_batch_first_router_need_tokens):
+        # 获取每个请求的输入长度，和估计的输出长度，为了计算当前批次的最大token数量
         for req in cur_handle_group_reqs:
             self.cache_len_list.append(
                 (req, req.get_tuple_tokens(is_busy, self.router.router_statics.ema_req_out_len))
             )  # hard to analysis
-
+        #根据请求输出长度排序，从大到小排序
         self.cache_len_list.sort(key=lambda x: -x[1][1])
-
+        # 计算每个请求加入后，内存占用的峰值。将最大值作为need_max_token_num
         need_max_token_num = 0
         cumsum_len = 0
         exist_group_req_set = set()
@@ -45,11 +47,12 @@ class ChunkedBeamContinuesBatchQueue(BaseQueue):
 
         # prefill token 计算, 因为对beam的prefill计算过程是共享的，所以只计算一个请求对应的token数量
         new_batch_first_router_need_tokens += req.get_first_router_need_tokens()
+        #约束1：token数量，内存占用峰值小于最大token数量
         ok_token_num = need_max_token_num < self.max_total_tokens
-
+        #约束2：请求数量，防止过多的请求同时被调度
         ok_req_num = len(self.cache_len_list) <= self.running_max_req_size
 
-        # prefill ok
+        # 约束3：prefill token数量
         ok_prefill = new_batch_first_router_need_tokens <= self.batch_max_tokens
 
         if ok_token_num and ok_req_num and ok_prefill:
@@ -63,6 +66,7 @@ class ChunkedBeamContinuesBatchQueue(BaseQueue):
             return False, new_batch_first_router_need_tokens
 
     # @calculate_time(show=True, min_cost_ms=10)
+    #把请求
     def generate_new_batch(self, current_batch: Batch):
         if len(self.waiting_req_list) == 0:
             return None
@@ -76,9 +80,14 @@ class ChunkedBeamContinuesBatchQueue(BaseQueue):
         self.filter_aborted_reqs()
         if len(self.waiting_req_list) == 0:
             return None
-
-        # 判断服务是否繁忙
+        #使用sjf
         is_busy = self.is_busy()
+        if self.need_sch:
+            self.waiting_req_list.sort(key=lambda req: req.get_tuple_tokens(is_busy, self.router.router_statics.ema_req_out_len)[1])
+            print("===== SJF TEST =====", flush=True)
+        else:
+            print("not need sch", flush=True)
+        # 判断服务是否繁忙
 
         self._init_cache_list(current_batch, is_busy)
         can_run_list = []
@@ -88,7 +97,7 @@ class ChunkedBeamContinuesBatchQueue(BaseQueue):
 
             if self._add_to_group(cur_group_reqs, req):
                 continue
-
+            # 根据缓存
             ok_insert, new_batch_first_router_need_tokens = self._can_add_new_group_reqs(
                 cur_group_reqs, is_busy, new_batch_first_router_need_tokens
             )

@@ -336,7 +336,7 @@ def _launch_subprocesses(args: StartArgs):
     send_and_receive_node_ip(args)
     set_env_start_args(args)
     logger.info(f"all start args:{args}")
-
+    #这里是多模型的，不启用
     if args.enable_multimodal:
         process_manager.start_submodule_processes(
             start_funcs=[
@@ -344,7 +344,7 @@ def _launch_subprocesses(args: StartArgs):
             ],
             start_args=[(args,)],
         )
-
+    # 视觉模型，不启用
     if not args.disable_vision:
         if not args.visual_use_proxy_mode:
             from .visualserver.manager import start_visual_process
@@ -368,7 +368,7 @@ def _launch_subprocesses(args: StartArgs):
                     (args,),
                 ],
             )
-
+    # 音频模型，不启用
     if not args.disable_audio:
         from .audioserver.manager import start_audio_process
 
@@ -380,7 +380,7 @@ def _launch_subprocesses(args: StartArgs):
                 (args,),
             ],
         )
-
+    # 如果启用了cpu cache, 启动cpu cache manager。这里不用
     if args.enable_cpu_cache:
         from .multi_level_kv_cache.manager import start_multi_level_kv_cache_manager
 
@@ -390,14 +390,14 @@ def _launch_subprocesses(args: StartArgs):
             ],
             start_args=[(args,)],
         )
-
+    # 启动 metric manager, 用于收集各个子进程的指标数据
     process_manager.start_submodule_processes(
         start_funcs=[
             start_metric_manager,
         ],
         start_args=[(args,)],
     )
-
+    #启动router和detokenization两个子进程，router用于调度请求，detokenization用于处理token到文本的转换
     router_process, _ = process_manager.start_submodule_processes(
         start_funcs=[start_router_process, start_detokenization_process],
         start_args=[
@@ -417,9 +417,11 @@ def _hypercorn_config_args(args: StartArgs):
 
 
 def normal_or_p_d_start(args: StartArgs):
+    #这里启动了三个subprcess。 router、metric、detokenization
     process_manager = _launch_subprocesses(args)
 
-    # 启动 Hypercorn
+    # 启动 Hypercorn， 作为 HTTP server，处理外部请求
+    # worker个数是http服务的个数
     command = [
         "hypercorn",
         *_hypercorn_config_args(args),
@@ -436,14 +438,14 @@ def normal_or_p_d_start(args: StartArgs):
         "lightllm.server.api_http:app",
     ]
 
-    # 启动子进程
+    # 启动http server进程
     http_server_process = subprocess.Popen(command)
 
     if "s3://" in args.model_dir:
         from lightllm.utils.petrel_helper import s3_model_clear
 
         s3_model_clear(args.model_dir)
-
+    # 启动健康监控子进程
     if args.health_monitor:
         from lightllm.server.health_monitor.manager import start_health_check_process
 

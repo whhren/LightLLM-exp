@@ -234,6 +234,7 @@ class RouterManager(RouterMultiNodeTpHelper, RouterRlOpHelper, object):
             await self._step()
             counter_count += 1
             if self.running_batch is not None:
+                # 每一百次打印详细信息
                 if counter_count % 100 == 0:
                     for dp_index in range(self.dp_size_in_node):
                         token_ratio1 = self.get_used_tokens(dp_index) / self.max_total_token_num
@@ -430,6 +431,7 @@ class RouterManager(RouterMultiNodeTpHelper, RouterRlOpHelper, object):
 
             logger.info(f"router recive req id {req.request_id} cost time {time.time() - req.start_time} s")
         self.req_queue.extend(req_group)
+        
         self.send_to_detokenization.send_pyobj(group_req_indexes, protocol=pickle.HIGHEST_PROTOCOL)
         return
 
