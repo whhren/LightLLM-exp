@@ -87,20 +87,20 @@ class ChunkedPrefillQueue(BaseQueue):
     # )
 
         # bub sort
-        # for i in range(len(self.waiting_req_list) - 1):
-        #     cur_len = self.waiting_req_list[i].get_tuple_tokens(
-        #         is_busy, self.router.router_statics.ema_req_out_len
-        #     )[1]
+        for i in range(len(self.waiting_req_list) - 1):
+            cur_len = self.waiting_req_list[i].get_tuple_tokens(
+                is_busy, self.router.router_statics.ema_req_out_len
+            )[1]
 
-        #     next_len = self.waiting_req_list[i + 1].get_tuple_tokens(
-        #         is_busy, self.router.router_statics.ema_req_out_len
-        #     )[1]
+            next_len = self.waiting_req_list[i + 1].get_tuple_tokens(
+                is_busy, self.router.router_statics.ema_req_out_len
+            )[1]
 
-        #     if cur_len > next_len:
-        #         self.waiting_req_list[i], self.waiting_req_list[i + 1] = (
-        #             self.waiting_req_list[i + 1],
-        #             self.waiting_req_list[i],
-        #         )
+            if cur_len > next_len:
+                self.waiting_req_list[i], self.waiting_req_list[i + 1] = (
+                    self.waiting_req_list[i + 1],
+                    self.waiting_req_list[i],
+                )
 
 
 
